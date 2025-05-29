@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AI Patent Drawing Generator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <h1>AI Patent Drawing Generator</h1>
+    <form id="patentForm">
+      <label for="description">Invention Description & Figure View</label>
+      <textarea id="description" placeholder="e.g. Patent drawing, Figure 1: A side view of an electric toothbrush. Show a handle, a bent flexible neck, and a brush head with bristles. Line art, no shading, labeled parts 10 (handle), 20 (neck), 30 (head)." required></textarea>
+      <label for="apiKey">OpenAI API Key</label>
+      <input id="apiKey" type="password" placeholder="Enter your OpenAI API key" required />
+      <button type="submit" id="generateBtn">Generate Drawing</button>
+    </form>
+    <div id="status"></div>
+    <div id="imageContainer">
+      <img id="patentImage" alt="Patent Drawing" style="display:none;" />
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html> 
