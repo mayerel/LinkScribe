@@ -1,9 +1,7 @@
-// Update active link in footer
-function updateActiveLink() {
+// Function to update active links in the footer
+function updateActiveLinks() {
     const currentPage = window.location.pathname.split('/').pop() || 'index.html';
-    const links = document.querySelectorAll('footer a[href]');
-    
-    links.forEach(link => {
+    document.querySelectorAll('footer a[href]').forEach(link => {
         const linkHref = link.getAttribute('href');
         if (linkHref === currentPage || 
             (currentPage === '' && linkHref === 'index.html') ||
@@ -19,30 +17,32 @@ function updateActiveLink() {
     });
 }
 
-// Load footer component
-const loadFooter = () => {
+// Load footer content
+function loadFooter() {
     const footerPlaceholder = document.querySelector('footer[data-component="footer"]');
-    if (footerPlaceholder) {
-        fetch('./components/footer.html')
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                return response.text();
-            })
-            .then(html => {
-                footerPlaceholder.insertAdjacentHTML('afterbegin', html);
-                updateActiveLink();
-            })
-            .catch(error => console.error('Error loading footer:', error));
-    }
-};
+    if (!footerPlaceholder) return;
 
-// Initialize when DOM is fully loaded
+    // Check if footer is already loaded
+    if (footerPlaceholder.querySelector('a')) {
+        updateActiveLinks();
+        return;
+    }
+
+    fetch('./components/footer.html')
+        .then(response => {
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            return response.text();
+        })
+        .then(html => {
+            footerPlaceholder.innerHTML = html;
+            updateActiveLinks();
+        })
+        .catch(error => console.error('Error loading footer:', error));
+}
+
+// Initialize when DOM is ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', loadFooter);
 } else {
     loadFooter();
 }
-
-export { updateActiveLink };

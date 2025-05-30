@@ -170,10 +170,28 @@ function generateImagePrompt(articleData, tone) {
  * @param {string} fileName - The file name for the downloaded image
  */
 export function downloadImage(base64Data, fileName = 'linkedin-post-image.png') {
-    const link = document.createElement('a');
-    link.href = `data:image/png;base64,${base64Data}`;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+        if (!base64Data) {
+            throw new Error('No image data available to download');
+        }
+        
+        const link = document.createElement('a');
+        link.href = `data:image/png;base64,${base64Data}`;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Show success notification if available
+        if (typeof showNotification === 'function') {
+            showNotification('Image downloaded successfully!', 'success');
+        }
+    } catch (error) {
+        console.error('Error downloading image:', error);
+        
+        // Show error notification if available
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to download image: ' + (error.message || 'Unknown error'), 'error');
+        }
+    }
 }

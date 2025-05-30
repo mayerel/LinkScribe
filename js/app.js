@@ -1,7 +1,7 @@
 // Main application file
 import { fetchAndParseArticle } from './articleParser.js';
 import { generateImage, downloadImage } from './imageGenerator.js';
-import { showNotification } from './utils.js';
+import { showNotification, escapeHtml } from './utils.js';
 import { generatePostWithAI, generateHashtagsWithAI } from './apiService.js';
 
 // Animation timings
@@ -52,22 +52,97 @@ function init() {
     // Cache DOM elements first
     cacheDOMElements();
     
-    // Then set up event listeners and load preferences
+    // Set up event listeners
     setupEventListeners();
-    loadUserPreferences();
+    
+    // Initialize any UI components
+    initUI();
+    
+    // Check for saved API key
+    checkForSavedApiKey();
+    
+    // Make sure the results and image sections are visible
+    if (resultsSection) {
+        resultsSection.style.display = 'block';
+    }
+    
+    // Ensure the image section is visible but with the correct initial state
+    if (imageSection) {
+        imageSection.style.display = 'block';
+        
+        // Show the placeholder if no image is loaded
+        const hasImage = generatedImage && generatedImage.src && !generatedImage.src.endsWith('undefined');
+        if (!hasImage && imagePlaceholder) {
+            // Make sure the placeholder has the correct HTML structure
+            if (!imagePlaceholder.querySelector('svg')) {
+                imagePlaceholder.innerHTML = `
+                    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <p class="mt-2 text-sm text-gray-500">Enable \"Generate an image\" and click \"Generate Post\" to create an image</p>
+                `;
+            }
+            imagePlaceholder.classList.remove('hidden');
+        }
+    }
+    
+    // Hide any existing error messages on load
+    const errorSection = document.querySelector('.error-message');
+    if (errorSection) {
+        errorSection.style.display = 'none';
+    }
 }
+
+// Initialize the application when the DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    try {
+        init();
+        
+        // Remove any existing API key validation message
+        const apiKeyValidation = document.getElementById('api-key-validation');
+        if (apiKeyValidation) {
+            apiKeyValidation.remove();
+        }
+        
+        // Remove error class from API key input
+        if (apiKeyInput) {
+            apiKeyInput.classList.remove('border-red-500');
+        }
+        
+        // Set up event listeners and load preferences
+        setupEventListeners();
+        loadUserPreferences();
+        
+        // Validate inputs without showing validation messages
+        validateInputs(false);
+    } catch (error) {
+        console.error('Error during initialization:', error);
+    }
+});
 
 // Set up event listeners
 function setupEventListeners() {
+    // Track user interaction with the form
+    const trackInteraction = () => {
+        if (!hasUserInteracted) {
+            hasUserInteracted = true;
+            validateInputs();
+        }
+    };
+    
     // URL input validation
     if (articleUrlInput) {
-        articleUrlInput.addEventListener('input', validateInputs);
+        articleUrlInput.addEventListener('input', () => {
+            trackInteraction();
+            validateInputs();
+        });
     }
     
     // Tone selection
     if (toneOptions && toneOptions.length > 0) {
         toneOptions.forEach(option => {
             option.addEventListener('click', () => {
+                trackInteraction();
                 if (option.classList.contains('selected') || isGenerating) return;
                 
                 // Add visual feedback
@@ -103,6 +178,7 @@ function setupEventListeners() {
     // Generate image toggle
     if (generateImageCheckbox) {
         generateImageCheckbox.addEventListener('change', () => {
+            trackInteraction();
             if (isGenerating) {
                 generateImageCheckbox.checked = !generateImageCheckbox.checked;
                 return;
@@ -110,6 +186,9 @@ function setupEventListeners() {
             
             // Store preference
             localStorage.setItem('linkscribe-generate-image', generateImageCheckbox.checked);
+            
+            // Validate to show/hide API key validation if needed
+            validateInputs();
         });
     }
     
@@ -117,6 +196,7 @@ function setupEventListeners() {
     if (apiKeyInput) {
         let apiKeyTimeout;
         apiKeyInput.addEventListener('input', (e) => {
+            trackInteraction();
             clearTimeout(apiKeyTimeout);
             
             // Add loading state to the input
@@ -143,12 +223,24 @@ function setupEventListeners() {
         });
     }
     
-    // Generate button
+    // Handle generate button click
     if (generateBtn) {
         generateBtn.addEventListener('click', async (e) => {
             e.preventDefault();
             try {
-                await handleGenerate();
+                // Force validation when generate is clicked
+                hasUserInteracted = true;
+                
+                // First validate without showing messages
+                validateInputs(false);
+                
+                // If form is valid, proceed
+                if (!generateBtn.disabled) {
+                    await handleGenerate();
+                } else {
+                    // If form is invalid, show validation messages
+                    validateInputs(true);
+                }
             } catch (err) {
                 console.error('Error generating post:', err);
                 showNotification(err.message || 'An error occurred while generating the post.');
@@ -159,24 +251,37 @@ function setupEventListeners() {
     // Copy buttons with enhanced feedback
     if (copyPostBtn) {
         copyPostBtn.addEventListener('click', () => {
-            copyToClipboard(generatedPostTextarea.value, 'Post');
-            showSuccessFeedback(copyPostBtn);
+            if (generatedPostTextarea && generatedPostTextarea.value) {
+                copyToClipboard(generatedPostTextarea.value, 'Post');
+                showSuccessFeedback(copyPostBtn);
+            } else {
+                showNotification('No post content available to copy', 'warning');
+            }
         });
     }
     
     if (copyHashtagsBtn) {
         copyHashtagsBtn.addEventListener('click', () => {
-            const hashtagsText = currentHashtags.join(' ');
-            copyToClipboard(hashtagsText, 'Hashtags');
-            showSuccessFeedback(copyHashtagsBtn);
+            if (currentHashtags && currentHashtags.length > 0) {
+                const hashtagsText = currentHashtags.join(' ');
+                copyToClipboard(hashtagsText, 'Hashtags');
+                showSuccessFeedback(copyHashtagsBtn);
+            } else {
+                showNotification('No hashtags available to copy', 'warning');
+            }
         });
     }
     
     if (copyAllBtn) {
         copyAllBtn.addEventListener('click', () => {
-            const combined = `${generatedPostTextarea.value}\n\n${currentHashtags.join(' ')}`;
-            copyToClipboard(combined, 'Post and hashtags');
-            showSuccessFeedback(copyAllBtn);
+            if (generatedPostTextarea && generatedPostTextarea.value) {
+                const hashtagsText = currentHashtags && currentHashtags.length > 0 ? `\n\n${currentHashtags.join(' ')}` : '';
+                const combined = `${generatedPostTextarea.value}${hashtagsText}`;
+                copyToClipboard(combined, 'Post and hashtags');
+                showSuccessFeedback(copyAllBtn);
+            } else {
+                showNotification('No content available to copy', 'warning');
+            }
         });
     }
     
@@ -186,6 +291,8 @@ function setupEventListeners() {
             if (generatedImageData) {
                 downloadImage(generatedImageData, `linkedin-post-image-${Date.now()}.png`);
                 showSuccessFeedback(downloadImageBtn, 'Downloaded!');
+            } else {
+                showNotification('No image available to download', 'warning');
             }
         });
     }
@@ -207,34 +314,81 @@ function setupEventListeners() {
     startOverBtn.addEventListener('click', resetApp);
 }
 
-// Load user preferences from localStorage
+/**
+ * Clears any previous session data and resets the form
+ */
+function clearPreviousSession() {
+    // Clear stored data
+    sessionStorage.removeItem('linkscribe-api-key');
+    
+    // Reset form fields
+    if (articleUrlInput) articleUrlInput.value = '';
+    if (apiKeyInput) apiKeyInput.value = '';
+    if (generateImageCheckbox) generateImageCheckbox.checked = false;
+    
+    // Reset tone selection
+    if (toneOptions && toneOptions.length > 0) {
+        toneOptions.forEach(option => {
+            option.classList.remove('selected', 'ring-2', 'ring-indigo-500', 'border-indigo-600');
+            option.style.borderColor = '';
+        });
+    }
+    
+    // Reset results section
+    if (resultsSection) {
+        resultsSection.classList.add('hidden');
+    }
+    
+    // Reset any error states
+    if (errorSection) {
+        errorSection.classList.add('hidden');
+    }
+    
+    // Reset image section
+    const imageElement = document.getElementById('generated-image');
+    if (imageElement) {
+        imageElement.src = '';
+        imageElement.classList.add('hidden');
+    }
+    
+    // Reset download button
+    const downloadBtn = document.getElementById('download-image');
+    if (downloadBtn) {
+        downloadBtn.classList.add('hidden');
+    }
+    
+    // Reset loading states
+    setLoadingState(false, '');
+    if (typeof showImageLoadingState === 'function') {
+        showImageLoadingState(false);
+    }
+}
+
+/**
+ * Loads user preferences (currently disabled to ensure fresh start each time)
+ */
 function loadUserPreferences() {
-    // Load saved tone preference
+    // Clear any previous session data first
+    clearPreviousSession();
+    
+    // Note: We're not loading any saved preferences to ensure a fresh start each time
+    // If you want to load preferences in the future, uncomment and modify the code below:
+    /*
+    // Load tone preference
     const savedTone = localStorage.getItem('linkscribe-preferred-tone');
-    if (savedTone && toneOptions && toneOptions.length > 0) {
-        const toneElement = document.querySelector(`[data-tone="${savedTone}"]`);
-        if (toneElement) {
-            // Simulate click on the tone option
-            const clickEvent = new MouseEvent('click', {
-                view: window,
-                bubbles: true,
-                cancelable: true
-            });
-            toneElement.dispatchEvent(clickEvent);
+    if (savedTone) {
+        const toneOption = document.querySelector(`.tone-option[data-tone="${savedTone}"]`);
+        if (toneOption) {
+            toneOption.click();
         }
     }
     
-    // Load generate image preference and set API key section visibility
+    // Load image generation preference
     const generateImagePref = localStorage.getItem('linkscribe-generate-image');
-    const apiKeySection = document.getElementById('api-key-section');
-    
-    if (generateImageCheckbox && apiKeySection) {
-        if (generateImagePref === 'true') {
-            generateImageCheckbox.checked = true;
-            apiKeySection.classList.remove('hidden');
-        } else {
-            generateImageCheckbox.checked = false;
-            apiKeySection.classList.add('hidden');
+    if (generateImagePref !== null) {
+        generateImageCheckbox.checked = generateImagePref === 'true';
+        if (apiKeySection) {
+            apiKeySection.classList.toggle('hidden', !generateImageCheckbox.checked);
         }
     }
     
@@ -243,10 +397,14 @@ function loadUserPreferences() {
     if (apiKey && apiKeyInput) {
         apiKeyInput.value = apiKey;
     }
+    */
 }
 
+// Track if user has interacted with the form
+let hasUserInteracted = false;
+
 // Validate inputs to enable/disable generate button
-function validateInputs() {
+function validateInputs(forceShowValidation = false) {
     if (!articleUrlInput || !generateBtn) return;
     
     const url = articleUrlInput.value.trim();
@@ -264,40 +422,51 @@ function validateInputs() {
     // Enable/disable generate button based on validation
     generateBtn.disabled = !canGenerate;
     
-    // Show API key validation message if needed
-    showApiKeyValidationMessage(!hasApiKey);
+    // Only show API key validation if we have the API key input element and user has interacted with it or we're forcing validation
+    if (apiKeyInput && (hasUserInteracted || forceShowValidation)) {
+        showApiKeyValidationMessage(!hasApiKey, forceShowValidation);
+    }
 }
 
 // Show/hide API key validation message
-function showApiKeyValidationMessage(show) {
-    if (!apiKeyInput) return;
+function showApiKeyValidationMessage(show, forceShowValidation = false) {
+    // Don't show validation if we don't have the input or if we're not forcing it
+    if (!apiKeyInput || (!hasUserInteracted && !forceShowValidation)) {
+        return;
+    }
     
     let validationMsg = document.getElementById('api-key-validation');
     
     if (show) {
-        // Only show validation if we have a parent node to append to
+        // Only show validation if we have a parent node to append to and we don't already have a message
         if (!validationMsg && apiKeyInput.parentNode) {
-            validationMsg = document.createElement('p');
-            validationMsg.id = 'api-key-validation';
-            validationMsg.className = 'text-red-500 text-sm mt-1';
-            validationMsg.textContent = 'OpenAI API key is required to generate your post';
-            
             try {
-                apiKeyInput.parentNode.appendChild(validationMsg);
+                validationMsg = document.createElement('p');
+                validationMsg.id = 'api-key-validation';
+                validationMsg.className = 'text-red-500 text-sm mt-1';
+                validationMsg.textContent = 'OpenAI API key is required to generate your post';
+                
+                // Insert the message after the input
+                apiKeyInput.insertAdjacentElement('afterend', validationMsg);
+                
                 // Add error styling to the input
                 apiKeyInput.classList.add('border-red-500');
             } catch (e) {
-                console.error('Error appending validation message:', e);
+                console.error('Error showing API key validation:', e);
             }
         }
     } else if (validationMsg) {
+        // Remove the validation message
         try {
             validationMsg.remove();
         } catch (e) {
             console.error('Error removing validation message:', e);
         }
-        // Remove error styling
-        apiKeyInput.classList.remove('border-red-500');
+        
+        // Remove error styling if the input exists
+        if (apiKeyInput) {
+            apiKeyInput.classList.remove('border-red-500');
+        }
     }
 }
 
@@ -334,7 +503,7 @@ async function handleGenerate() {
     
     try {
         isGenerating = true;
-        setLoadingState(true);
+        setLoadingState(true, 'Loading...');
         
         // Hide any previous error messages
         if (errorSection) {
@@ -388,28 +557,23 @@ async function handleGenerate() {
                 showImageLoadingState(true);
                 const imageData = await generateImage(articleData, selectedTone, apiKey);
                 displayGeneratedImage(imageData);
-            } catch (error) {
-                console.error('Error generating image:', error);
-                showNotification('Failed to generate image. ' + error.message, 'error');
-            } finally {
-                showImageLoadingState(false);
-                return;
-            }
-            
-            generateImage(article, selectedTone, apiKey)
-                .then(imageData => {
-                    displayGeneratedImage(imageData);
-                    // Update the download button in the sliding panel
+                
+                // Enable the download button in the panel
+                if (window.SlidingPanel) {
                     const downloadBtn = document.getElementById('download-image-btn');
                     if (downloadBtn) {
-                        downloadBtn.classList.remove('hidden');
+                        downloadBtn.disabled = false;
+                        downloadBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                        downloadBtn.classList.add('bg-indigo-600', 'hover:bg-indigo-700');
                     }
-                })
-                .catch(error => {
-                    console.error('Image generation error:', error);
-                    // Don't fail the whole process if image generation fails
-                    showError('Post generated, but image generation failed: ' + (error.message || 'Unknown error'));
-                });
+                }
+            } catch (error) {
+                console.error('Error generating image:', error);
+                // Show a non-blocking notification for image generation failure
+                showNotification('Post generated, but image generation failed: ' + (error.message || 'Unknown error'), 'warning');
+            } finally {
+                showImageLoadingState(false);
+            }
         }
     } catch (error) {
         console.error('Error in post generation process:', error);
@@ -436,48 +600,62 @@ async function handleGenerate() {
 }
 
 // Display the generated results
-function displayResults(post, hashtags) {
+function displayResults(post, hashtags = []) {
     return new Promise((resolve) => {
         try {
             if (!post) {
                 throw new Error('No post content was generated. Please try again.');
             }
-
-            // Update the UI with the generated content
-            if (generatedPostTextarea) {
-                generatedPostTextarea.value = post;
-            } else {
-                console.warn('Generated post textarea not found');
+            
+            // Ensure results section is visible
+            if (resultsSection) {
+                resultsSection.style.display = 'block';
             }
             
-            // Update hashtags if provided
-            currentHashtags = Array.isArray(hashtags) ? hashtags : [];
+            // Update the post content and hashtags
+            if (generatedPostTextarea) {
+                generatedPostTextarea.value = post;
+                generatedPostTextarea.disabled = false;
+            }
             
-            // Show the results panel and update its content
-            const resultsPanel = document.getElementById('results-panel');
-            const generatedPost = document.getElementById('generated-post');
-            const hashtagsContainer = document.getElementById('hashtags-container');
-            
-            if (resultsPanel && generatedPost) {
-                // Update the content
-                generatedPost.textContent = post;
+            // Update hashtags
+            if (hashtagsContainer) {
+                hashtagsContainer.innerHTML = '';
                 
-                // Update hashtags if available
-                if (hashtagsContainer && currentHashtags && currentHashtags.length > 0) {
-                    hashtagsContainer.innerHTML = currentHashtags
-                        .map(tag => `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">${tag}</span>`)
-                        .join('');
+                if (Array.isArray(hashtags) && hashtags.length > 0) {
+                    hashtags.forEach(tag => {
+                        const span = document.createElement('span');
+                        span.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800 mr-2 mb-2';
+                        span.textContent = tag;
+                        hashtagsContainer.appendChild(span);
+                    });
+                    
+                    if (copyHashtagsBtn) {
+                        copyHashtagsBtn.disabled = false;
+                        copyHashtagsBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                    }
+                } else {
+                    const noTags = document.createElement('span');
+                    noTags.className = 'text-gray-400 text-sm';
+                    noTags.textContent = 'No hashtags generated';
+                    hashtagsContainer.appendChild(noTags);
+                    
+                    if (copyHashtagsBtn) {
+                        copyHashtagsBtn.disabled = true;
+                        copyHashtagsBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                    }
                 }
-                
-                // Show the panel
-                resultsPanel.classList.add('active');
-                resultsPanel.style.opacity = '1';
-                resultsPanel.style.pointerEvents = 'auto';
-                
-                // Show the panel content
-                const panelContent = resultsPanel.querySelector('div');
-                if (panelContent) {
-                    panelContent.style.transform = 'translateX(0)';
+            }
+            
+            // Enable copy buttons
+            if (copyPostBtn) copyPostBtn.disabled = false;
+            if (copyAllBtn) copyAllBtn.disabled = false;
+            
+            // Scroll to results on mobile
+            if (window.innerWidth < 768) {
+                const resultsSection = document.querySelector('.results-section');
+                if (resultsSection) {
+                    resultsSection.scrollIntoView({ behavior: 'smooth' });
                 }
             }
             
@@ -551,135 +729,175 @@ function displayGeneratedImage(base64Data) {
     
     generatedImageData = base64Data;
     
-    // Show the image section if it was hidden
-    imageSection.classList.remove('hidden');
+    // Make sure the image section is visible
+    if (imageSection) {
+        imageSection.style.display = 'block';
+        
+        // Update the image container styling
+        const imageContainer = document.getElementById('image-container');
+        if (imageContainer) {
+            imageContainer.classList.remove('border-dashed');
+            imageContainer.classList.add('border-solid', 'border-indigo-300');
+        }
+    }
     
     // Set the image source
-    generatedImage.src = `data:image/png;base64,${base64Data}`;
-    generatedImage.classList.remove('hidden');
+    if (generatedImage) {
+        generatedImage.src = `data:image/png;base64,${base64Data}`;
+        generatedImage.classList.remove('hidden');
+    }
     
-    // Hide placeholder and show the image
-    if (imagePlaceholder) {
-        imagePlaceholder.classList.add('hidden');
+    // Hide the placeholder
+    const placeholder = document.getElementById('image-placeholder');
+    if (placeholder) {
+        placeholder.classList.add('hidden');
+    }
+    
+    // Show the image actions
+    const imageActions = document.getElementById('image-actions');
+    if (imageActions) {
+        imageActions.classList.remove('hidden');
     }
     
     // Hide loading state
     showImageLoadingState(false);
     
-    // Show action buttons
+    // Enable the download button
     if (downloadImageBtn) {
-        downloadImageBtn.classList.remove('hidden');
+        downloadImageBtn.disabled = false;
     }
-    
-    const openInNewTabBtn = document.getElementById('open-in-new-tab');
-    if (openInNewTabBtn) {
-        openInNewTabBtn.classList.remove('hidden');
-    }
-    
-    // Scroll to the image section
-    setTimeout(() => {
-        imageSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }, 100);
 }
 
 // Show error message to the user
-function showError(message) {
-    console.error('Showing error to user:', message);
+/**
+ * Displays an error message to the user
+ * @param {string|Error} message - The error message or Error object to display
+ * @param {string} [title] - Optional title for the error
+ * @param {number} [duration=10000] - Duration in milliseconds to show the error (default: 10s)
+ */
+function showError(message, title, duration = 10000) {
+    // Handle Error objects
+    const errorMessage = message instanceof Error ? message.message : message;
+    const errorStack = message instanceof Error ? message.stack : null;
+    
+    // Log detailed error to console
+    console.error('Application error:', message);
+    if (errorStack) {
+        console.error(errorStack);
+    }
     
     // Hide loading state for image if applicable
     if (typeof showImageLoadingState === 'function') {
         showImageLoadingState(false);
     }
     
-    // Show error message in the UI if error elements exist
-    const errorMsgElement = document.getElementById('error-message');
-    const errorSectionElement = document.getElementById('error-section');
+    // Show error notification
+    const notificationMessage = title 
+        ? `<strong>${escapeHtml(title)}</strong><br>${escapeHtml(errorMessage)}`
+        : escapeHtml(errorMessage);
     
-    if (errorMsgElement && errorSectionElement) {
-        // Set error message text
-        errorMsgElement.textContent = message;
-        
-        // Make sure error section is visible
-        errorSectionElement.classList.remove('hidden');
-        errorSectionElement.style.display = 'block';
-        errorSectionElement.style.opacity = '0';
-        errorSectionElement.style.transform = 'translateY(-10px)';
-        
-        // Trigger reflow
-        void errorSectionElement.offsetWidth;
-        
-        // Animate in
-        errorSectionElement.style.opacity = '1';
-        errorSectionElement.style.transform = 'translateY(0)';
-        errorSectionElement.style.transition = `opacity ${ANIMATION_DURATION}ms ease-out, transform ${ANIMATION_DURATION}ms ease-out`;
-        
-        // Hide error after 8 seconds with animation
-        setTimeout(() => {
-            errorSectionElement.style.opacity = '0';
-            errorSectionElement.style.transform = 'translateY(-10px)';
-            
-            setTimeout(() => {
-                errorSectionElement.style.display = 'none';
-            }, ANIMATION_DURATION);
-        }, 8000);
-    } else {
-        // Fallback to notification if error section is not available
-        console.warn('Error elements not found in DOM, using notification fallback');
-        showNotification(`Error: ${message}`, 5000);
+    showNotification(notificationMessage, 'error', duration);
+    
+    // Re-enable UI elements
+    if (generateBtn) {
+        generateBtn.disabled = false;
+        generateBtn.textContent = 'Generate LinkedIn Post';
+        generateBtn.classList.remove('opacity-50', 'cursor-not-allowed');
     }
     
-    // Show placeholder if no image was generated
-    if (!generatedImageData && imagePlaceholder) {
-        imagePlaceholder.classList.remove('hidden');
+    if (generateImageCheckbox) {
+        generateImageCheckbox.disabled = false;
     }
     
-    // Hide any action buttons
-    if (downloadImageBtn) {
-        downloadImageBtn.classList.add('hidden');
+    if (toneOptions && toneOptions.length > 0) {
+        toneOptions.forEach(option => {
+            if (option) option.style.pointerEvents = 'auto';
+        });
     }
     
-    const openInNewTabBtn = document.getElementById('open-in-new-tab');
-    if (openInNewTabBtn) {
-        openInNewTabBtn.classList.add('hidden');
-    }
+    // Hide loading state
+    setLoadingState(false);
 }
 
 // Show/hide image loading state
 function showImageLoadingState(isLoading) {
+    // Ensure the image section is visible
+    if (imageSection) {
+        imageSection.style.display = 'block';
+    }
+    
     if (isLoading) {
-        // Show loading spinner
+        // Show loading state in the main UI
         if (imageLoading) {
             imageLoading.classList.remove('hidden');
         }
         
-        // Hide placeholder and image
-        if (imagePlaceholder) {
-            imagePlaceholder.classList.add('hidden');
-        }
-        
+        // Hide the image and show the loading state
         if (generatedImage) {
             generatedImage.classList.add('hidden');
         }
         
-        // Hide action buttons
-        if (downloadImageBtn) {
-            downloadImageBtn.classList.add('hidden');
+        // Hide the placeholder
+        if (imagePlaceholder) {
+            imagePlaceholder.classList.add('hidden');
         }
         
-        const openInNewTabBtn = document.getElementById('open-in-new-tab');
-        if (openInNewTabBtn) {
-            openInNewTabBtn.classList.add('hidden');
+        // Hide image actions
+        const imageActions = document.getElementById('image-actions');
+        if (imageActions) {
+            imageActions.classList.add('hidden');
+        }
+        
+        // Disable the download button
+        if (downloadImageBtn) {
+            downloadImageBtn.disabled = true;
+        }
+        
+        // Update the image container styling for loading state
+        const imageContainer = document.getElementById('image-container');
+        if (imageContainer) {
+            imageContainer.classList.add('border-dashed');
+            imageContainer.classList.remove('border-solid', 'border-indigo-300');
         }
     } else {
-        // Hide loading spinner
+        // Hide loading state in the main UI
         if (imageLoading) {
             imageLoading.classList.add('hidden');
+        }
+        
+        // Show the image if we have one, otherwise show the placeholder
+        const hasImage = generatedImage && generatedImage.src && !generatedImage.src.endsWith('undefined');
+        
+        if (hasImage) {
+            generatedImage.classList.remove('hidden');
+            
+            // Show the image actions
+            const imageActions = document.getElementById('image-actions');
+            if (imageActions) {
+                imageActions.classList.remove('hidden');
+            }
+            
+            // Update the image container styling
+            const imageContainer = document.getElementById('image-container');
+            if (imageContainer) {
+                imageContainer.classList.remove('border-dashed');
+                imageContainer.classList.add('border-solid', 'border-indigo-300');
+            }
+        } else if (imagePlaceholder) {
+            imagePlaceholder.classList.remove('hidden');
+        }
+        
+        // Re-enable the download button if we have an image
+        if (downloadImageBtn) {
+            downloadImageBtn.disabled = !hasImage;
         }
     }
 }
 
 // Set loading state
-function setLoadingState(isLoading) {
+// @param {boolean} isLoading - Whether to show the loading state
+// @param {string} [message=''] - Optional message to display in the error section
+function setLoadingState(isLoading, message = '') {
     if (isLoading) {
         loadingIndicator.classList.remove('hidden');
         loadingIndicator.style.opacity = '0';
@@ -716,46 +934,67 @@ function setLoadingState(isLoading) {
             validateInputs();
         }, ANIMATION_DURATION);
     }
-    errorSection.classList.remove('hidden');
-    errorMessage.textContent = message;
-    errorSection.scrollIntoView({ behavior: 'smooth' });
+    if (message) {
+        errorSection.classList.remove('hidden');
+        errorMessage.textContent = message;
+        errorSection.scrollIntoView({ behavior: 'smooth' });
+    }
 }
 
 // Copy content to clipboard
 async function copyToClipboard(text, contentType) {
     try {
         await navigator.clipboard.writeText(text);
-        showNotification(`${contentType} copied to clipboard!`);
+        showNotification(`${contentType} copied to clipboard!`, 'success');
+        return true;
     } catch (err) {
-        showError('Failed to copy to clipboard. Please try manually selecting and copying the text.');
+        console.error('Failed to copy to clipboard:', err);
+        showNotification(
+            'Failed to copy to clipboard. Please try manually selecting and copying the text.',
+            'error',
+            5000
+        );
+        return false;
     }
 }
 
 // Reset the application
 function resetApp() {
+    // Reset form fields and UI state
+    resetForm();
+    
     // Hide results and error sections
-    resultsSection.classList.add('hidden');
-    errorSection.classList.add('hidden');
-    
-    // Clear URL input
-    articleUrlInput.value = '';
-    
-    // Disable generate button
-    generateBtn.disabled = true;
+    if (resultsSection) resultsSection.classList.add('hidden');
+    if (errorSection) errorSection.classList.add('hidden');
     
     // Reset image section
-    generatedImage.classList.add('hidden');
-    imageLoading.classList.add('hidden');
-    downloadImageBtn.classList.add('hidden');
-    imagePlaceholder.textContent = 'Your companion image will appear here';
-    imagePlaceholder.classList.remove('text-red-500');
-    imagePlaceholder.classList.remove('hidden');
+    if (generatedImage) {
+        generatedImage.classList.add('hidden');
+        generatedImage.src = '';
+    }
+    if (imageLoading) imageLoading.classList.add('hidden');
+    if (downloadImageBtn) downloadImageBtn.classList.add('hidden');
+    if (imagePlaceholder) {
+        // Reset to the original placeholder HTML
+        imagePlaceholder.innerHTML = `
+            <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <p class="mt-2 text-sm text-gray-500">Enable "Generate an image" and click "Generate Post" to create an image</p>
+        `;
+        imagePlaceholder.classList.remove('text-red-500', 'hidden');
+    }
+    
+    // Reset the panel state
+    if (window.SlidingPanel) {
+        window.SlidingPanel.hide();
+    }
     
     // Clear generated image data
     generatedImageData = null;
     
-    // Focus on URL input
-    articleUrlInput.focus();
+    // Focus on URL input if available
+    if (articleUrlInput) articleUrlInput.focus();
 }
 
 // Initialize the app when the DOM is fully loaded

@@ -8,65 +8,118 @@
  * @param {string} url - The URL of the article to fetch
  * @returns {Promise<Object>} - The extracted article data
  */
+// List of CORS proxy servers to try
+const PROXY_SERVERS = [
+    'https://api.allorigins.win/get?url=',
+    'https://cors-anywhere.herokuapp.com/',
+    'https://api.codetabs.com/v1/proxy?quest=',
+    'https://corsproxy.io/?',
+    'https://thingproxy.freeboard.io/fetch/'
+];
+
+// Function to try fetching from multiple proxies
+async function tryFetchWithProxies(url, proxies) {
+    let lastError;
+    
+    for (const proxy of proxies) {
+        try {
+            const proxyUrl = `${proxy}${encodeURIComponent(url)}`;
+            console.log(`Trying proxy: ${proxyUrl}`);
+            
+            const response = await fetch(proxyUrl, {
+                headers: {
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Proxy error: ${response.status} ${response.statusText}`);
+            }
+            
+            let data;
+            if (proxy.includes('allorigins.win')) {
+                data = await response.json();
+                return data.contents || data;
+            } else {
+                return await response.text();
+            }
+            
+        } catch (error) {
+            console.error(`Proxy ${proxy} failed:`, error.message);
+            lastError = error;
+            continue;
+        }
+    }
+    
+    throw lastError || new Error('All proxy attempts failed');
+}
+
 export async function fetchAndParseArticle(url) {
-    console.log('Fetching article from URL:', url);
+    console.log(`Fetching article from URL: ${url}`);
     
     // Validate URL format
     if (!url || !url.startsWith('http')) {
-        throw new Error('Please enter a valid URL starting with http:// or https://');
+        throw new Error('Please provide a valid URL starting with http:// or https://');
     }
     
-    // Encode the URL for use in the proxy
-    const encodedUrl = encodeURIComponent(url);
-    // Using a free CORS proxy service
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodedUrl}`;
-    
     try {
-        console.log('Fetching via CORS proxy:', proxyUrl);
+        // Try direct fetch first
+        let html;
+        try {
+            const response = await fetch(url, {
+                headers: {
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            html = await response.text();
+            
+        } catch (directError) {
+            console.log('Direct fetch failed, trying proxies...', directError.message);
+            html = await tryFetchWithProxies(url, PROXY_SERVERS);
+        }
         
-        const response = await fetch(proxyUrl, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            },
-            cache: 'no-store'
+        // Parse the HTML
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        
+        // Extract title
+        const title = doc.querySelector('title')?.textContent || 'No title';
+        
+        // Try to find the main content
+        const article = doc.querySelector('article') || 
+                       doc.querySelector('main') || 
+                       doc.querySelector('.post-content') ||
+                       doc.querySelector('.article-content') ||
+                       doc.body;
+        
+        // Clean up the content
+        const unwantedSelectors = [
+            'script', 'style', 'iframe', 'noscript', 'nav', 'footer', 'header', 
+            'aside', '.ad', '.ads', '.advertisement', '.social-share', '.comments',
+            '.related-posts', '.sidebar', '.newsletter', '.newsletter-form'
+        ];
+        
+        unwantedSelectors.forEach(selector => {
+            article.querySelectorAll(selector).forEach(el => el.remove());
         });
         
-        console.log('Received response with status:', response.status, response.statusText);
-        
-        if (!response.ok) {
-            const errorText = await response.text().catch(() => 'No response body');
-            console.error('Error response:', errorText);
-            throw new Error(`Failed to fetch article: ${response.status} ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        
-        // The proxy wraps the response in a JSON object
-        if (!data.contents) {
-            console.error('Unexpected response format from proxy:', data);
-            throw new Error('Failed to retrieve article content from the proxy service');
-        }
-        
-        // Extract and return the article content
-        return extractArticleContent(data.contents, url);
+        // Return the document and text content
+        return {
+            document: article.ownerDocument,
+            title: title,
+            text: article.textContent.trim()
+        };
         
     } catch (error) {
         console.error('Error in fetchAndParseArticle:', error);
-        
-        // Provide a helpful error message
-        if (error.message.includes('Failed to fetch')) {
-            throw new Error(
-                'Unable to fetch the article. This might be due to network issues or the website blocking our request.\n\n' +
-                'Please try one of these solutions:\n' +
-                '1. Try a different article URL\n' +
-                '2. Check your internet connection\n' +
-                '3. Try again later if the website might be temporarily unavailable'
-            );
-        }
-        
-        // Re-throw the original error with a more user-friendly message
         throw new Error(`Failed to process the article: ${error.message}`);
     }
 }
