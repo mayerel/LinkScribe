@@ -4,11 +4,6 @@
  */
 
 /**
- * Shows a toast notification to the user
- * @param {string} message - The message to display
- * @param {number} duration - Duration in milliseconds (default: 3000ms)
- */
-/**
  * Shows a success feedback on a button
  * @param {HTMLElement} button - The button element to show feedback on
  * @param {string} [customText] - Optional custom success text to display
