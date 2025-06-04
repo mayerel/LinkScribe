@@ -352,7 +352,7 @@ function clearPreviousSession() {
     }
     
     // Reset download button
-    const downloadBtn = document.getElementById('download-image');
+    const downloadBtn = document.getElementById('download-image-btn');
     if (downloadBtn) {
         downloadBtn.classList.add('hidden');
     }
