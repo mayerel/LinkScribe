@@ -109,8 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
             apiKeyInput.classList.remove('border-red-500');
         }
         
-        // Set up event listeners and load preferences
-        setupEventListeners();
+        // Load any saved preferences
         loadUserPreferences();
         
         // Validate inputs without showing validation messages
@@ -659,42 +658,6 @@ function displayResults(post, hashtags = []) {
                 }
             }
             
-            // Handle image generation if enabled
-            const shouldGenerateImage = generateImageCheckbox && generateImageCheckbox.checked;
-            
-            if (shouldGenerateImage) {
-                if (typeof showImageLoadingState === 'function') {
-                    showImageLoadingState(true);
-                }
-                
-                // Generate image if we have the required parameters
-                if (article && selectedTone && apiKey) {
-                    generateImage(article, selectedTone, apiKey)
-                        .then(() => {
-                            if (typeof showImageLoadingState === 'function') {
-                                showImageLoadingState(false);
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Error generating image:', error);
-                            if (typeof showImageLoadingState === 'function') {
-                                showImageLoadingState(false);
-                            }
-                            // Show a non-blocking notification for image generation failure
-                            if (typeof showNotification === 'function') {
-                                showNotification('Image generation failed. Your post was still created successfully.', 'warning');
-                            }
-                        });
-                } else {
-                    console.warn('Missing required parameters for image generation');
-                    if (typeof showImageLoadingState === 'function') {
-                        showImageLoadingState(false);
-                    }
-                }
-            } else if (imageSection) {
-                // Hide the image section if image generation is not enabled
-                imageSection.classList.add('hidden');
-            }
             
             // Update the UI state
             setLoadingState(false);
@@ -997,5 +960,3 @@ function resetApp() {
     if (articleUrlInput) articleUrlInput.focus();
 }
 
-// Initialize the app when the DOM is fully loaded
-document.addEventListener('DOMContentLoaded', init);
