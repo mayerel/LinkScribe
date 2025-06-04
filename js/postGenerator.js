@@ -11,7 +11,7 @@ const tonePersonas = {
             "This piece offers compelling insights on",
             "An interesting analysis about",
             "Key takeaways from this insightful read on",
-            "This article presents a fascinating perspective on"
+            "This article presents a fascinating perspective on",
         ],
         transitions: [
             "What stood out to me was",
